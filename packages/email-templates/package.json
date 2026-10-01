@@ -1,0 +1,28 @@
+{
+  "name": "@forge/email-templates",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "react-email components for Forge AI transactional email",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "lint": "eslint . --max-warnings 0",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@react-email/components": "^0.0.25",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@forge/config": "workspace:*",
+    "@types/react": "^18.3.11",
+    "@types/react-dom": "^18.3.0",
+    "eslint": "^9.12.0",
+    "typescript": "^5.6.0",
+    "vitest": "^3.2.0"
+  }
+}

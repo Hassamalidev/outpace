@@ -1,0 +1,30 @@
+{
+  "name": "forge-ai",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Forge AI — AI-powered B2B outbound sales platform",
+  "packageManager": "pnpm@12.8.1",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "db:push": "pnpm --filter @forge/db db:push",
+    "db:migrate": "pnpm --filter @forge/db db:migrate",
+    "db:seed": "pnpm --filter @forge/db db:seed",
+    "db:studio": "pnpm --filter @forge/db db:studio"
+  },
+  "prettier": "@forge/config/prettier",
+  "devDependencies": {
+    "@forge/config": "workspace:*",
+    "prettier": "^3.3.3",
+    "turbo": "^2.1.0",
+    "typescript": "^5.6.0"
+  }
+}
