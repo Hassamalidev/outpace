@@ -1,0 +1,11 @@
+{
+  "extends": "@forge/config/tsconfig.nextjs.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  },
+  "include": ["next-env.d.ts", "src", "*.config.*", ".next/types/**/*.ts"],
+  "exclude": ["node_modules"]
+}

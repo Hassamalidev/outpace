@@ -1,0 +1,9 @@
+{
+  "extends": ["@forge/config/tsconfig.react.json", "./.wxt/tsconfig.json"],
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true
+  }
+}
