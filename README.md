@@ -23,8 +23,22 @@ Requires Node.js 20+ and pnpm.
 ```bash
 pnpm install
 cp .env.example .env   # then fill in the values you need
+docker compose up -d   # local Postgres (pgvector) + Redis
+pnpm db:migrate        # apply migrations
+pnpm db:seed           # demo workspace, campaign, leads and stats
 pnpm dev
 ```
+
+## Database
+
+The Prisma schema lives in `packages/db/schema.prisma`; migrations are in `packages/db/migrations`.
+
+| Command           | What it does                                     |
+| ----------------- | ------------------------------------------------ |
+| `pnpm db:migrate` | Create and apply a migration from schema changes |
+| `pnpm db:push`    | Push the schema without creating a migration     |
+| `pnpm db:seed`    | Seed demo data (safe to run repeatedly)          |
+| `pnpm db:studio`  | Open Prisma Studio                               |
 
 ## Scripts
 

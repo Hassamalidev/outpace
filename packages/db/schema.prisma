@@ -1,0 +1,734 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  directUrl  = env("DIRECT_URL")
+  extensions = [pgvector(map: "vector")]
+}
+
+// ─── Auth & Users ────────────────────────────────────────────────────────────
+
+model User {
+  id             String   @id @default(cuid())
+  clerkId        String   @unique
+  email          String   @unique
+  name           String?
+  avatarUrl      String?
+  timezone       String   @default("UTC")
+  locale         String   @default("en")
+  credits        Float    @default(30)
+  plan           Plan     @default(FREE)
+  role           UserRole @default(MEMBER)
+  onboardingStep Int      @default(0)
+  onboardingDone Boolean  @default(false)
+  calcomToken    String?
+  calcomRefresh  String?
+  calcomUserId   String?
+  linkedinCookie String? // for LinkedIn automation
+  linkedinUrn    String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  workspaceMembers WorkspaceMember[]
+  apiKeys          ApiKey[]
+  notifications    Notification[]
+  creditTx         CreditTransaction[]
+}
+
+enum Plan {
+  FREE
+  STARTER
+  GROWTH
+  SCALE
+  ENTERPRISE
+}
+
+enum UserRole {
+  MEMBER
+  ADMIN
+  OWNER
+}
+
+model Workspace {
+  id                   String   @id @default(cuid())
+  name                 String
+  slug                 String   @unique
+  logoUrl              String?
+  primaryColor         String   @default("#2563EB")
+  customDomain         String?  @unique
+  customDomainVerified Boolean  @default(false)
+  plan                 Plan     @default(FREE)
+  credits              Float    @default(30)
+  dailyEmailLimit      Int      @default(500)
+  createdAt            DateTime @default(now())
+
+  members         WorkspaceMember[]
+  campaigns       Campaign[]
+  leads           Lead[]
+  sequences       Sequence[]
+  templates       EmailTemplate[]
+  sendingDomains  SendingDomain[]
+  integrations    Integration[]
+  webhooks        Webhook[]
+  apiKeys         ApiKey[]
+  suppressionList SuppressionEntry[]
+  accounts        TargetAccount[]
+  creditTx        CreditTransaction[]
+}
+
+model WorkspaceMember {
+  id          String        @id @default(cuid())
+  workspaceId String
+  workspace   Workspace     @relation(fields: [workspaceId], references: [id])
+  userId      String
+  user        User          @relation(fields: [userId], references: [id])
+  role        WorkspaceRole @default(MEMBER)
+  invitedAt   DateTime      @default(now())
+  acceptedAt  DateTime?
+
+  @@unique([workspaceId, userId])
+}
+
+enum WorkspaceRole {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+// ─── Campaigns ───────────────────────────────────────────────────────────────
+
+model Campaign {
+  id               String         @id @default(cuid())
+  workspaceId      String
+  workspace        Workspace      @relation(fields: [workspaceId], references: [id])
+  name             String
+  websiteUrl       String?
+  status           CampaignStatus @default(ANALYZING)
+  mode             CampaignMode   @default(MANUAL) // MANUAL or AUTONOMOUS
+  websiteAnalysis  Json?
+  icp              Json? // ICP segments with fit scores
+  emailStyle       Json?
+  abmMode          Boolean        @default(false)
+  targetAccountIds String[]
+  channels         Channel[]      @default([EMAIL])
+  dailySendCap     Int            @default(100)
+  createdBy        String
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  leads         Lead[]
+  sequences     CampaignSequence[]
+  emailVariants EmailVariant[]
+  stats         CampaignStat[]
+  events        EmailEvent[]
+  buyingSignals BuyingSignal[]
+}
+
+enum CampaignStatus {
+  ANALYZING
+  PENDING_APPROVAL
+  RUNNING
+  PAUSED
+  COMPLETED
+  ARCHIVED
+}
+
+enum CampaignMode {
+  MANUAL
+  AUTONOMOUS
+}
+
+enum Channel {
+  EMAIL
+  LINKEDIN
+  TWITTER
+  SMS
+  WHATSAPP
+  PHONE
+}
+
+// ─── Sequences ───────────────────────────────────────────────────────────────
+
+model Sequence {
+  id          String             @id @default(cuid())
+  workspaceId String
+  workspace   Workspace          @relation(fields: [workspaceId], references: [id])
+  name        String
+  description String?
+  steps       SequenceStep[]
+  campaigns   CampaignSequence[]
+  isTemplate  Boolean            @default(false)
+  createdAt   DateTime           @default(now())
+}
+
+model CampaignSequence {
+  campaignId String
+  campaign   Campaign @relation(fields: [campaignId], references: [id])
+  sequenceId String
+  sequence   Sequence @relation(fields: [sequenceId], references: [id])
+
+  @@id([campaignId, sequenceId])
+}
+
+model SequenceStep {
+  id              String          @id @default(cuid())
+  sequenceId      String
+  sequence        Sequence        @relation(fields: [sequenceId], references: [id])
+  order           Int
+  channel         Channel
+  delayDays       Int             @default(0)
+  delayHours      Int             @default(0)
+  sendWindow      Json? // { days: [1,2,3,4,5], hourStart: 9, hourEnd: 17, tz: "prospect" }
+  condition       Json? // { if: "opened", then: "skip" | "continue" | "branch_to": stepId }
+  subjectTemplate String?
+  bodyTemplate    String? // Liquid template syntax
+  linkedinAction  LinkedInAction?
+  smsBody         String?
+  isActive        Boolean         @default(true)
+}
+
+enum LinkedInAction {
+  CONNECT
+  VIEW_PROFILE
+  FOLLOW
+  MESSAGE
+  COMMENT_POST
+  LIKE_POST
+}
+
+// ─── Leads ───────────────────────────────────────────────────────────────────
+
+model Lead {
+  id              String         @id @default(cuid())
+  workspaceId     String
+  workspace       Workspace      @relation(fields: [workspaceId], references: [id])
+  campaignId      String?
+  campaign        Campaign?      @relation(fields: [campaignId], references: [id])
+  targetAccountId String?
+  targetAccount   TargetAccount? @relation(fields: [targetAccountId], references: [id])
+
+  // Identity
+  firstName     String
+  lastName      String
+  email         String
+  emailVerified Boolean @default(false)
+  emailScore    Int? // 0-100 from verifier
+  phone         String?
+  linkedinUrl   String?
+  twitterHandle String?
+
+  // Company
+  company         String?
+  companyDomain   String?
+  companyLinkedin String?
+  title           String?
+  seniority       String?
+  department      String?
+  companySize     String?
+  industry        String?
+  location        String?
+  country         String?
+  timezone        String?
+
+  // Scoring
+  fitScore    Int? // 0-100 AI-generated
+  intentScore Int? // 0-100 from buying signals
+  segment     String?
+
+  // Enrichment
+  enrichmentSources Json? // which sources returned data
+  enrichmentData    Json? // full raw enrichment payload
+  techStack         String[] // from BuiltWith/Wappalyzer
+  fundingStage      String?
+  fundingAmount     BigInt?
+  employeeGrowth    Float? // % change in headcount last 6mo
+  recentNews        Json[] // [{ headline, url, date }]
+  jobPostings       Json[] // [{ title, url, postedDate }]
+
+  // Personalization
+  personalizedEmail Json? // { subject, body, preheader }
+  icebreaker        String? // one custom sentence generated from research
+  videoThumbnailUrl String?
+
+  // Status
+  status           LeadStatus     @default(PENDING)
+  emailStatus      EmailStatus    @default(NOT_SENT)
+  linkedinStatus   LinkedInStatus @default(NOT_STARTED)
+  sequenceStep     Int            @default(0)
+  unsubscribed     Boolean        @default(false)
+  doNotContact     Boolean        @default(false)
+  complianceRegion String? // "EU", "CA", "US", etc.
+  consentGiven     Boolean        @default(false)
+
+  // Metadata
+  source        String? // "apollo", "csv_import", "manual", "chrome_ext"
+  importBatchId String?
+  crmContactId  String? // HubSpot/Salesforce contact ID
+  crmDealId     String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  emailEvents         EmailEvent[]
+  inboxMessages       InboxMessage[]
+  sequenceEnrollments SequenceEnrollment[]
+  buyingSignals       BuyingSignal[]
+  callRecordings      CallRecording[]
+}
+
+enum LeadStatus {
+  PENDING
+  APPROVED
+  ACTIVE
+  REPLIED
+  HOT
+  WARM
+  COLD
+  MEETING_BOOKED
+  CONVERTED
+  PAUSED
+  BOUNCED
+}
+
+enum EmailStatus {
+  NOT_SENT
+  QUEUED
+  SENT
+  OPENED
+  CLICKED
+  REPLIED
+  BOUNCED
+  UNSUBSCRIBED
+}
+
+enum LinkedInStatus {
+  NOT_STARTED
+  CONNECTION_SENT
+  CONNECTED
+  MESSAGE_SENT
+  REPLIED
+}
+
+model SequenceEnrollment {
+  id          String    @id @default(cuid())
+  leadId      String
+  lead        Lead      @relation(fields: [leadId], references: [id])
+  sequenceId  String
+  currentStep Int       @default(0)
+  status      String    @default("active") // active, paused, completed, exited
+  enrolledAt  DateTime  @default(now())
+  nextStepAt  DateTime?
+  exitReason  String?
+}
+
+// ─── Account-Based Marketing ─────────────────────────────────────────────────
+
+model TargetAccount {
+  id             String       @id @default(cuid())
+  workspaceId    String
+  workspace      Workspace    @relation(fields: [workspaceId], references: [id])
+  name           String
+  domain         String
+  website        String?
+  industry       String?
+  size           String?
+  location       String?
+  linkedinUrl    String?
+  fitScore       Int?
+  intentScore    Int?
+  stage          AccountStage @default(TARGET)
+  assignedTo     String?
+  crmAccountId   String?
+  tierLevel      Int? // 1 = highest priority
+  researchData   Json?
+  stakeholderMap Json? // { "executive": [...], "champion": [...], "blocker": [...] }
+  createdAt      DateTime     @default(now())
+
+  leads         Lead[]
+  buyingSignals BuyingSignal[]
+}
+
+enum AccountStage {
+  TARGET
+  ENGAGED
+  MEETING
+  OPPORTUNITY
+  CLOSED_WON
+  CLOSED_LOST
+}
+
+// ─── Email Infrastructure ────────────────────────────────────────────────────
+
+model SendingDomain {
+  id               String     @id @default(cuid())
+  workspaceId      String?
+  workspace        Workspace? @relation(fields: [workspaceId], references: [id])
+  domain           String     @unique
+  registrarOrderId String?
+  cloudflareZoneId String?
+  warmthScore      Int        @default(0)
+  dailyLimit       Int        @default(50)
+  sentToday        Int        @default(0)
+  spfVerified      Boolean    @default(false)
+  dkimVerified     Boolean    @default(false)
+  dmarcVerified    Boolean    @default(false)
+  mxVerified       Boolean    @default(false)
+  isActive         Boolean    @default(true)
+  isPlatformPool   Boolean    @default(true)
+  provisionedAt    DateTime   @default(now())
+  fullyWarmedAt    DateTime?
+
+  mailboxes Mailbox[]
+}
+
+model Mailbox {
+  id                String        @id @default(cuid())
+  domainId          String
+  domain            SendingDomain @relation(fields: [domainId], references: [id])
+  address           String        @unique
+  displayName       String?
+  smtpHost          String
+  smtpPort          Int
+  imapHost          String
+  imapPort          Int
+  usernameEncrypted String
+  passwordEncrypted String
+  warmthScore       Int           @default(0)
+  dailyLimit        Int           @default(30)
+  sentToday         Int           @default(0)
+  isWarmed          Boolean       @default(false)
+  isActive          Boolean       @default(true)
+  lastSentAt        DateTime?
+  reputationScore   Float? // from Google Postmaster / MxToolbox
+}
+
+// ─── Inbox & Replies ──────────────────────────────────────────────────────────
+
+model InboxMessage {
+  id                String       @id @default(cuid())
+  workspaceId       String
+  leadId            String?
+  lead              Lead?        @relation(fields: [leadId], references: [id])
+  threadId          String
+  channel           Channel      @default(EMAIL)
+  direction         String // "inbound" | "outbound"
+  from              String
+  to                String
+  subject           String?
+  bodyText          String
+  bodyHtml          String?
+  classification    MessageClass @default(NEUTRAL)
+  sentimentScore    Float? // -1 to 1
+  aiDraft           String?
+  aiDraftConfidence Float?
+  reviewRequired    Boolean      @default(false)
+  repliedAt         DateTime?
+  openedAt          DateTime?
+  receivedAt        DateTime     @default(now())
+}
+
+enum MessageClass {
+  HOT
+  WARM
+  NEUTRAL
+  COLD
+  UNSUBSCRIBE
+  OUT_OF_OFFICE
+  REFERRAL
+}
+
+// ─── Email Templates ─────────────────────────────────────────────────────────
+
+model EmailTemplate {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+  name        String
+  subject     String
+  bodyHtml    String
+  bodyText    String
+  channel     Channel   @default(EMAIL)
+  tags        String[]
+  isShared    Boolean   @default(false)
+  performance Json? // { openRate, replyRate, sampleSize }
+  createdBy   String
+  createdAt   DateTime  @default(now())
+}
+
+model EmailVariant {
+  id         String   @id @default(cuid())
+  campaignId String
+  campaign   Campaign @relation(fields: [campaignId], references: [id])
+  label      String // "A", "B", "C"
+  subject    String
+  bodyHtml   String
+  sentCount  Int      @default(0)
+  openCount  Int      @default(0)
+  clickCount Int      @default(0)
+  replyCount Int      @default(0)
+  isWinner   Boolean  @default(false)
+  isPaused   Boolean  @default(false)
+  confidence Float? // statistical confidence 0-1
+}
+
+// ─── Events & Analytics ──────────────────────────────────────────────────────
+
+model EmailEvent {
+  id         String    @id @default(cuid())
+  leadId     String
+  lead       Lead      @relation(fields: [leadId], references: [id])
+  campaignId String
+  campaign   Campaign  @relation(fields: [campaignId], references: [id])
+  event      EventType
+  channel    Channel   @default(EMAIL)
+  metadata   Json?
+  ip         String?
+  userAgent  String?
+  timestamp  DateTime  @default(now())
+
+  @@index([campaignId, timestamp])
+  @@index([leadId])
+}
+
+enum EventType {
+  SENT
+  DELIVERED
+  OPENED
+  CLICKED
+  REPLIED
+  BOUNCED
+  UNSUBSCRIBED
+  SPAM_REPORT
+  MEETING_BOOKED
+}
+
+model CampaignStat {
+  id           String   @id @default(cuid())
+  campaignId   String
+  campaign     Campaign @relation(fields: [campaignId], references: [id])
+  date         DateTime @db.Date
+  channel      Channel  @default(EMAIL)
+  sent         Int      @default(0)
+  delivered    Int      @default(0)
+  opened       Int      @default(0)
+  clicked      Int      @default(0)
+  replied      Int      @default(0)
+  hotReplies   Int      @default(0)
+  meetings     Int      @default(0)
+  bounced      Int      @default(0)
+  unsubscribed Int      @default(0)
+  spend        Float    @default(0)
+  costPerLead  Float?
+  revenue      Float? // from CRM deal close value
+
+  @@unique([campaignId, date, channel])
+}
+
+// ─── Buying Signals ───────────────────────────────────────────────────────────
+
+model BuyingSignal {
+  id              String         @id @default(cuid())
+  workspaceId     String
+  leadId          String?
+  lead            Lead?          @relation(fields: [leadId], references: [id])
+  campaignId      String?
+  campaign        Campaign?      @relation(fields: [campaignId], references: [id])
+  targetAccountId String?
+  targetAccount   TargetAccount? @relation(fields: [targetAccountId], references: [id])
+  type            SignalType
+  source          String // "linkedin", "news", "g2", "intent", "funding", etc.
+  title           String
+  description     String?
+  url             String?
+  strength        Int // 1-10
+  triggeredAction String? // what outreach action was auto-triggered
+  createdAt       DateTime       @default(now())
+}
+
+enum SignalType {
+  JOB_CHANGE
+  FUNDING_ROUND
+  HIRING_SPREE
+  TECH_CHANGE
+  COMPETITOR_MENTIONED
+  WEBSITE_VISIT
+  G2_REVIEW
+  NEWS_MENTION
+  LINKEDIN_POST
+  FOLLOW_UP_DUE
+  INTENT_SURGE
+  PRODUCT_LAUNCH
+}
+
+// ─── Call Intelligence ────────────────────────────────────────────────────────
+
+model CallRecording {
+  id             String   @id @default(cuid())
+  leadId         String
+  lead           Lead     @relation(fields: [leadId], references: [id])
+  workspaceId    String
+  twilioCallSid  String?  @unique
+  duration       Int? // seconds
+  recordingUrl   String?
+  transcriptRaw  String?
+  transcriptJson Json? // speaker-diarised segments
+  summary        String? // AI-generated
+  nextSteps      String[] // AI-extracted action items
+  objections     String[] // AI-extracted objections raised
+  sentiment      Float?
+  crmUpdated     Boolean  @default(false)
+  followUpEmail  String? // AI-drafted follow-up
+  createdAt      DateTime @default(now())
+}
+
+// ─── Integrations ────────────────────────────────────────────────────────────
+
+model Integration {
+  id           String          @id @default(cuid())
+  workspaceId  String
+  workspace    Workspace       @relation(fields: [workspaceId], references: [id])
+  type         IntegrationType
+  accessToken  String?
+  refreshToken String?
+  tokenExpiry  DateTime?
+  metadata     Json? // portal ID, instance URL, etc.
+  isActive     Boolean         @default(true)
+  lastSyncAt   DateTime?
+  createdAt    DateTime        @default(now())
+
+  @@unique([workspaceId, type])
+}
+
+enum IntegrationType {
+  HUBSPOT
+  SALESFORCE
+  PIPEDRIVE
+  CLOSE
+  MONDAY
+  NOTION
+  SLACK
+  TEAMS
+  DISCORD
+  CALENDLY
+  CALCOM
+  GOOGLE_CALENDAR
+  OUTLOOK_CALENDAR
+  ZAPIER
+  MAKE
+  N8N
+  LINKEDIN
+  TWITTER
+  PHANTOMBUSTER
+  TWILIO
+  SENDGRID
+}
+
+// ─── Webhooks ────────────────────────────────────────────────────────────────
+
+model Webhook {
+  id              String            @id @default(cuid())
+  workspaceId     String
+  workspace       Workspace         @relation(fields: [workspaceId], references: [id])
+  url             String
+  events          String[]
+  secret          String
+  isActive        Boolean           @default(true)
+  failCount       Int               @default(0)
+  lastTriggeredAt DateTime?
+  deliveries      WebhookDelivery[]
+}
+
+model WebhookDelivery {
+  id         String   @id @default(cuid())
+  webhookId  String
+  webhook    Webhook  @relation(fields: [webhookId], references: [id])
+  event      String
+  payload    Json
+  statusCode Int?
+  response   String?
+  attempts   Int      @default(1)
+  success    Boolean  @default(false)
+  createdAt  DateTime @default(now())
+}
+
+// ─── API Keys ─────────────────────────────────────────────────────────────────
+
+model ApiKey {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+  userId      String
+  user        User      @relation(fields: [userId], references: [id])
+  name        String
+  keyHash     String    @unique
+  keyPrefix   String // first 8 chars, shown in UI
+  lastUsedAt  DateTime?
+  expiresAt   DateTime?
+  scopes      String[] // ["campaigns:read", "leads:write", etc.]
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+}
+
+// ─── Billing ─────────────────────────────────────────────────────────────────
+
+model CreditTransaction {
+  id              String    @id @default(cuid())
+  workspaceId     String
+  workspace       Workspace @relation(fields: [workspaceId], references: [id])
+  userId          String?
+  user            User?     @relation(fields: [userId], references: [id])
+  amount          Float // negative = debit
+  balanceAfter    Float
+  type            String // "top_up", "email_sent", "linkedin_action", "sms_sent", "free_trial", "refund"
+  description     String
+  stripePaymentId String?
+  leadId          String?
+  campaignId      String?
+  createdAt       DateTime  @default(now())
+
+  @@index([workspaceId, createdAt])
+}
+
+// ─── Compliance ───────────────────────────────────────────────────────────────
+
+model SuppressionEntry {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+  email       String
+  reason      String // "unsubscribed", "bounced", "spam", "manual", "dnc_list"
+  global      Boolean   @default(false) // global suppression across all workspaces
+  addedAt     DateTime  @default(now())
+
+  @@unique([workspaceId, email])
+}
+
+model ComplianceLog {
+  id          String   @id @default(cuid())
+  workspaceId String
+  leadId      String?
+  email       String
+  action      String // "consent_obtained", "unsubscribe_processed", "data_deleted", "opt_in_confirmed"
+  region      String
+  ipAddress   String?
+  userAgent   String?
+  timestamp   DateTime @default(now())
+}
+
+// ─── Notifications ───────────────────────────────────────────────────────────
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  type      String
+  title     String
+  body      String
+  url       String?
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
