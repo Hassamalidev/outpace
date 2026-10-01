@@ -4,6 +4,7 @@ packages:
 
 # Dependencies allowed to run install scripts (pnpm blocks them by default).
 allowBuilds:
+  '@clerk/shared': false
   '@prisma/client': true
   '@prisma/engines': true
   esbuild: true
